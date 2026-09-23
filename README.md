@@ -1,8 +1,8 @@
 # Claude Code Token 审计：我的 token 到底花在哪了
 
-Claude Code 额度老是不够用。我让 Claude 翻了自己过去 14 天的本地会话日志，结论和我的直觉很不一样：
+Claude Code 额度老是不够用。我的用法是：**让最强的 Fable 5.1 只负责编排，具体活全部派给 Opus/Sonnet subagent 去干**，本以为这样既省又稳。让 Claude 翻了自己过去 14 天的本地会话日志，结论和我的直觉很不一样：
 
-- **84% 的 token 花在 subagent 上**，不是主会话。
+- **84% 的 token 花在 subagent 上**，不是主会话。「Fable 编排 + subagent 执行」这套流程 14 天派出了 1,047 个 subagent，每个都背着 47k 的开场上下文从零开始，同一份材料被编排者、实现者、验证者各读一遍。
 - **输出只占加权成本的 6–7%**。让 Claude「少说话」的各种技巧，天花板就这么高。
 - **装了约 480 个 skill，60 天只用过 25 个**。
 - **每个会话一开场就是约 40k token 的固定上下文**，每次调用都要重读一遍。
@@ -32,7 +32,7 @@ Claude Code 额度老是不够用。我让 Claude 翻了自己过去 14 天的�
 | 主会话 | 341 | 2 | 40k | 44k |
 | Subagent | 1,047 | 27 | 47k | 124k |
 
-原因是我在全局 `CLAUDE.md` 里写了「主模型只编排、不执行，默认并行派 subagent」。结果：
+原因是我在全局 `CLAUDE.md` 里写了一条「铁律」：**Fable 5.1 是编排者不是执行者**——它只做需求澄清、拆解和验收，读代码、写代码、跑测试一律派给 subagent，默认并行，实现和验证还要分开派。初衷是把最贵的模型留给判断，结果：
 
 1. **每个 subagent 都从零开始**：约 47k 的固定上下文，每次调用重读一遍。27 次调用 ≈ 1.3M token 只是在重读系统提示、skill 列表和 CLAUDE.md。1,000 多个 subagent 下来，**约三分之一的 subagent 开销是纯固定成本**。
 2. **同一份材料被读三遍**：编排者规划时读一遍，实现 agent 读一遍，验证 agent 再读一遍。
@@ -196,7 +196,7 @@ python3 analyze.py --days 30
 
 ## English summary
 
-I audited 14 days of my local Claude Code logs (~46k API calls). **84% of tokens went to subagents**; output was only ~6–7% of weighted cost, so "make Claude terse" tools have a low ceiling. Only 25 of ~480 installed skills were used in 60 days. Fixed per-session context was ~40k tokens, re-read on every call. Cutting it with the native `skillOverrides` setting (hide unused skills from the model, keep them invokable via `/name`), disabling unused plugins/MCP, and slimming CLAUDE.md brought it to ~25k. Mid-session model switching turned out negligible (~1%). Old tool output being re-read accounts for ~17% of cache reads, which is where output-compression tools like RTK actually help. Run `python3 analyze.py` to see your own numbers — stdlib only, fully local.
+My setup: Fable 5.1 only orchestrates, and all real work is delegated to Opus/Sonnet subagents. I audited 14 days of my local Claude Code logs (~46k API calls). **84% of tokens went to subagents** (1,047 of them, each starting from a 47k-token fixed context, with orchestrator, implementer and verifier re-reading the same material); output was only ~6–7% of weighted cost, so "make Claude terse" tools have a low ceiling. Only 25 of ~480 installed skills were used in 60 days. Fixed per-session context was ~40k tokens, re-read on every call. Cutting it with the native `skillOverrides` setting (hide unused skills from the model, keep them invokable via `/name`), disabling unused plugins/MCP, and slimming CLAUDE.md brought it to ~25k. Mid-session model switching turned out negligible (~1%). Old tool output being re-read accounts for ~17% of cache reads, which is where output-compression tools like RTK actually help. Run `python3 analyze.py` to see your own numbers — stdlib only, fully local.
 
 ## License
 
