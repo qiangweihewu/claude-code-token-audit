@@ -6,7 +6,7 @@ Claude Code 额度老是不够用。我的用法是：**让最强的 Fable 5.1 �
 - **输出只占加权成本的 6–7%**。让 Claude「少说话」的各种技巧，天花板就这么高。
 - **装了约 480 个 skill，60 天只用过 25 个**。
 - **每个会话一开场就是约 40k token 的固定上下文**，每次调用都要重读一遍。
-- 频繁 `/model` 切换模型，几乎不费 token（14 天仅约 2.1M）。
+- `/model` 切换模型：会话开头切不花钱；会话中途切，每次要为新模型重写整段上下文的缓存（约 90k，相当于多跑 15–20 次调用）。我 14 天中途只切了 23 次，共约 2.1M，占总成本不到 1%——占比小是因为切得少，不是因为切换便宜。
 
 这个仓库包含：分析方法和数据、我做的改动与效果、一个在你自己电脑上跑的审计脚本 `analyze.py`（纯本地，不上传任何东西），以及对 40 多个「省 token」GitHub 项目的评估。
 
@@ -73,7 +73,15 @@ Fable 主会话自己只用了约 0.44B，却带出了 2.59B 的 subagent 消耗
 
 ### 1.5 切换模型
 
-缓存按模型隔离，会话中途切模型要重写整个上下文的缓存。但我 127 次 `/model` 大多在会话开头，中途切换只有 23 次，额外成本约 2.1M，约 1%。**开头切随便切，别在上下文很大时切就行。**
+缓存按模型隔离，会话中途切模型，新模型要把整段上下文重新写一遍缓存。
+
+| | 数值 |
+|---|---|
+| 单次中途切换的缓存写入 | 约 90k（按缓存写 1.25–2× 计价，约等于多跑 15–20 次普通调用） |
+| 14 天中途切换次数 | 23 次（127 次 `/model` 大多在会话开头，不花钱） |
+| 合计额外缓存写入 | 约 2.1M，占缓存写入约 1%、加权总成本约 0.3–0.5% |
+
+**单次不便宜，只是我切得少。** 开头切随便切；上下文已经很大时，先 `/clear` 或开新会话再切。
 
 ---
 
@@ -206,7 +214,7 @@ python3 analyze.py --days 30
 
 ## English summary
 
-My setup: Fable 5.1 only orchestrates, and all real work is delegated to Opus/Sonnet subagents. I audited 14 days of my local Claude Code logs (~46k API calls). **84% of tokens went to subagents** (1,047 of them, each starting from a 47k-token fixed context, with orchestrator, implementer and verifier re-reading the same material); output was only ~6–7% of weighted cost, so "make Claude terse" tools have a low ceiling. Only 25 of ~480 installed skills were used in 60 days. Fixed per-session context was ~40k tokens, re-read on every call. Cutting it with the native `skillOverrides` setting (hide unused skills from the model, keep them invokable via `/name`), disabling unused plugins/MCP, and slimming CLAUDE.md brought it to ~25k. Mid-session model switching turned out negligible (~1%). Old tool output being re-read accounts for ~17% of cache reads, which is where output-compression tools like RTK actually help. Run `python3 analyze.py` to see your own numbers — stdlib only, fully local.
+My setup: Fable 5.1 only orchestrates, and all real work is delegated to Opus/Sonnet subagents. I audited 14 days of my local Claude Code logs (~46k API calls). **84% of tokens went to subagents** (1,047 of them, each starting from a 47k-token fixed context, with orchestrator, implementer and verifier re-reading the same material); output was only ~6–7% of weighted cost, so "make Claude terse" tools have a low ceiling. Only 25 of ~480 installed skills were used in 60 days. Fixed per-session context was ~40k tokens, re-read on every call. Cutting it with the native `skillOverrides` setting (hide unused skills from the model, keep them invokable via `/name`), disabling unused plugins/MCP, and slimming CLAUDE.md brought it to ~25k. Mid-session model switching costs ~90k of cache writes each time (≈15–20 extra calls); it was only ~1% of my total because I rarely switch mid-session. Old tool output being re-read accounts for ~17% of cache reads, which is where output-compression tools like RTK actually help. Run `python3 analyze.py` to see your own numbers — stdlib only, fully local.
 
 ## License
 
