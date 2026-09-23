@@ -3,6 +3,8 @@
 Claude Code 额度老是不够用。我的用法是：**让最强的 Fable 5.1 只负责编排，具体活全部派给 Opus/Sonnet subagent 去干**，本以为这样既省又稳。让 Claude 翻了自己过去 14 天的本地会话日志，结论和我的直觉很不一样：
 
 - **84% 的 token 花在 subagent 上**，不是主会话。「Fable 编排 + subagent 执行」这套流程 14 天派出了 1,047 个 subagent，每个都背着 47k 的开场上下文从零开始，同一份材料被编排者、实现者、验证者各读一遍。
+- **按钱算没那么夸张，但大头仍在 subagent**：按 API 价格折算，Fable 编排者每花 1 元，下面的 subagent 花约 2.9 元（按 token 数是 1:6.6——subagent 多用便宜模型，单价低）。
+- **同样的用量换成 Opus 5.5 能省约 40%**：Opus 5.5 比 Opus 5 每一项都便宜，缓存读只有它的 40%；而我 514 个 `opus` subagent 实际跑的都是 Opus 5。
 - **输出只占加权成本的 6–7%**。让 Claude「少说话」的各种技巧，天花板就这么高。
 - **装了约 480 个 skill，60 天只用过 25 个**。
 - **每个会话一开场就是约 40k token 的固定上下文**，每次调用都要重读一遍。
@@ -40,7 +42,7 @@ Claude Code 额度老是不够用。我的用法是：**让最强的 Fable 5.1 �
 | Opus 5 | 239 | 0.98B | 25% |
 | Opus 5.5 | 129 | 0.41B | 10% |
 
-Fable 主会话自己只用了约 0.44B，却带出了 2.59B 的 subagent 消耗——**编排者每花 1 个 token，下面的 subagent 就花约 6 个**。Fable 编排的会话（主会话 + 子代理）合计约占全部 token 的 64%。
+Fable 主会话自己只用了约 0.44B，却带出了 2.59B 的 subagent 消耗——**按 token 数，编排者每花 1 个，下面的 subagent 花约 6 个；按钱算约 1:2.9**（见 1.6）。Fable 编排的会话（主会话 + 子代理）合计约占全部 token 的 64%、API 等价成本的 72%。
 
 问题出在哪：
 
@@ -48,7 +50,7 @@ Fable 主会话自己只用了约 0.44B，却带出了 2.59B 的 subagent 消耗
 2. **同一份材料被读三遍**：编排者规划时读一遍，实现 agent 读一遍，验证 agent 再读一遍。
 3. **便宜的活没给便宜的模型**：514 个 subagent 用了 Opus，只有 23 个用了 Haiku。
 
-编排模式不是错的——把大量阅读从最贵的模型挪到便宜模型，总 token 多了钱也可能更少。问题在于**过度派发**：小任务也派、并行太多、模型分配偏贵。
+编排模式不是错的——把大量阅读从最贵的模型挪到便宜模型，总 token 多了钱也可能更少（Fable 自己干是否更便宜，取决于它要用多少 token，这点日志证明不了，见 1.6）。问题在于**过度派发**：小任务也派、并行太多、模型分配偏贵。
 
 ### 1.2 开场固定上下文 40k
 
@@ -82,6 +84,53 @@ Fable 主会话自己只用了约 0.44B，却带出了 2.59B 的 subagent 消耗
 | 合计额外缓存写入 | 约 2.1M，占缓存写入约 1%、加权总成本约 0.3–0.5% |
 
 **单次不便宜，只是我切得少。** 开头切随便切；上下文已经很大时，先 `/clear` 或开新会话再切。
+
+### 1.6 按钱算：API 价格折算与 Opus 5.5
+
+订阅额度不是简单的 token 数。官方文档说：额度受**模型选择**影响（不同模型消耗速度不同，但没公布比例）；**缓存复用的内容计得更少**；**subagent 和主会话共用同一额度**；另外 Fable 有**单独的每周上限**。公式不公开，最接近的代理是 API 价格。
+
+官方 API 价格（每百万 token，输入 / 输出 / 缓存读；缓存写 = 输入 × 1.25（5 分钟）或 × 2（1 小时））：
+
+| 模型 | 输入 | 输出 | 缓存读 |
+|---|---|---|---|
+| Fable 5.1 | $10 | $50 | $0.25 |
+| Opus 5.5 | $4 | $20 | $0.20 |
+| Opus 5 | $5 | $25 | $0.50 |
+| Sonnet 5 | $2 | $10 | $0.20 |
+| Haiku 4.5 | $1 | $5 | $0.10 |
+
+注意 Fable 5.1 的缓存读（$0.25）比 Opus 5（$0.50）还便宜——它贵在缓存写和输出。
+
+我 14 天按 API 价格折算约 **$3,315**：
+
+| | token | 折算 | 占比 |
+|---|---|---|---|
+| Fable 主会话 | 0.44B | $614 | 19% |
+| Fable 派出的 subagent | 2.89B | $1,769 | 53% |
+| ├ 其中 Opus 5 | 1.97B | $1,477 | |
+| └ 其中 Sonnet 5 | 0.92B | $287 | |
+| 其他会话 | | $932 | 28% |
+
+每百万 token 的综合单价：Fable 主会话约 $1.40，Opus 5 subagent 约 $0.75，Sonnet 5 subagent 约 $0.31。subagent 单价确实低，但只低一半，不是低到五分之一。
+
+**Fable 自己干会不会更便宜？** 盈亏点是：Fable 直接干如果只需要 subagent 总量的约 44%（1.26B）以内，就更便宜。每个 subagent 重建 47k 上下文、重读文件，这个比例有可能达到，但日志无法证明。
+
+**把 Opus 5.5 考虑进来**（token 数不变，只换模型重新计价）：
+
+| 情景 | 折算 | 节省 |
+|---|---|---|
+| 现状 | $3,315 | — |
+| 编排者 Fable 5.1 → Opus 5.5 | $2,975 | −10% |
+| **Opus 5 subagent → Opus 5.5** | **$2,342** | **−29%** |
+| 两者都换 | $2,002 | **−40%** |
+
+同一份 Fable 主会话的用量，换成 Opus 5.5 综合单价约 $0.67/百万，已经比 Opus 5 subagent 还便宜。所以：
+
+- **主会话用 Opus 5.5 时，再派给 Opus subagent 不省钱**，只多出每个 subagent 的开场与重读开销。subagent 只为三件事派：隔离大量探索输出、真正的并行、把机械活降级给 Sonnet/Haiku。
+- Fable 留给真正最难的推理——它有单独的周上限，少用也是在保护它。
+- 我 514 个用 `opus` 别名派出的 subagent 跑的是 Opus 5。用环境变量把别名指向 Opus 5.5（见 2.2）是零成本的最大一项。
+
+口径：API 价格来自 Anthropic 官方价目；缓存写按日志里的 5 分钟 / 1 小时分项计价；假设换模型后 token 数不变（Opus 5.5 与 Opus 5 同 tokenizer）。订阅额度的真实权重不公开，这里只是代理。
 
 ---
 
@@ -128,6 +177,7 @@ python3 analyze.py --days 60 --suggest-overrides > overrides.json
 {
   "bashOutputMaxChars": 15000,   // Bash 输出内联上限，默认 30000 字符；超出部分存文件，Claude 仍可读
   "autoCompactWindow": 160000,   // 我原来设了 500000，但上下文窗口只有 200k，等于没设
+  "env": { "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5-5" },  // 让 `opus` 别名（包括 subagent 的 model: "opus"）指向 Opus 5.5
   "enabledPlugins": { "some-unused-plugin": false }
 }
 ```
@@ -142,8 +192,9 @@ python3 analyze.py --days 60 --suggest-overrides > overrides.json
 ```markdown
 ## 任务分配与 subagent
 - 能直接做就直接做：≤3 个文件、目标单一的任务不派 subagent。
-- 只在两种情况派 subagent：① 大量探索输出需要与主上下文隔离；② 确有互不依赖的并行子任务。一次并行 ≤3 个。
-- 模型：探索/搜索/批量看图 → haiku；实现、模板、机械改动 → sonnet；复杂判断、独立验证 → opus。
+- 主会话默认 Opus 5.5；只有最难的推理才切 Fable。
+- 只在三种情况派 subagent：① 大量探索输出需要与主上下文隔离；② 确有互不依赖的并行子任务（一次 ≤3 个）；③ 把机械活降级给更便宜的模型。
+- 模型：探索/搜索/批量看图 → haiku；实现、模板、机械改动 → sonnet；复杂判断、独立验证 → opus（已指向 Opus 5.5）。
 - 继续已有 agent 用 SendMessage，不要为同一件事重开新 agent。
 - 派 ≥3 个 agent 或处理 ≥50 条数据前，先报模型、数量、预估 token。
 ```
@@ -191,30 +242,32 @@ git clone https://github.com/qiangweihewu/claude-code-token-audit
 cd claude-code-token-audit
 python3 analyze.py            # 最近 14 天
 python3 analyze.py --days 30
+python3 analyze.py --cost     # 按 API 价格折算，并给出换成 Opus 5.5 的情景
 ```
 
 只读 `~/.claude/projects/` 下的本地日志，只用 Python 标准库，不联网、不上传。输出包括：各模型用量、主会话 vs subagent 占比、开场上下文大小、工具输出重读估算、中途切换模型次数、实际用过的 skill。
 
 **口径说明**：
 - 工具输出重读量是估算：文本按约 3.5 字符/token、图片按约 1.6k token 计，遇到 compact 截止。
-- 成本权重用的是官方价格比例（缓存读 0.1×、写 1.25–2×、输出 5×），订阅额度的实际计算方式可能不同。
+- 成本权重用的是官方价格比例（缓存读 0.1×、写 1.25–2×、输出 5×）；`--cost` 用各模型的实际 API 价格（写在脚本顶部的 `PRICES` 里，改价时自己更新）。订阅额度的实际权重不公开，这只是代理。
 - 只统计日志文件修改时间在窗口内的会话。
 
 ---
 
 ## 5. 优先级（按我的数据）
 
-1. **少派 subagent**，派就派对模型 —— 最大头
-2. **砍开场固定上下文**：skillOverrides、禁用不用的插件和 MCP、精简 CLAUDE.md —— 每次调用都受益，subagent 越多收益越大
-3. **压缩工具输出**：`bashOutputMaxChars`、RTK 类工具 —— 约 5–8%
-4. 机械批处理别走 Claude Code 会话
-5. 「让 AI 少说话」—— 最后才考虑
+1. **换对模型**：`opus` 别名指向 Opus 5.5、主会话默认 Opus 5.5 —— 同样用量约省 40%，零改动成本
+2. **少派 subagent**，派就派便宜的模型 —— token 的最大头
+3. **砍开场固定上下文**：skillOverrides、禁用不用的插件和 MCP、精简 CLAUDE.md —— 每次调用都受益，subagent 越多收益越大
+4. **压缩工具输出**：`bashOutputMaxChars`、RTK 类工具 —— 约 5–8%
+5. 机械批处理别走 Claude Code 会话
+6. 「让 AI 少说话」—— 最后才考虑
 
 ---
 
 ## English summary
 
-My setup: Fable 5.1 only orchestrates, and all real work is delegated to Opus/Sonnet subagents. I audited 14 days of my local Claude Code logs (~46k API calls). **84% of tokens went to subagents** (1,047 of them, each starting from a 47k-token fixed context, with orchestrator, implementer and verifier re-reading the same material); output was only ~6–7% of weighted cost, so "make Claude terse" tools have a low ceiling. Only 25 of ~480 installed skills were used in 60 days. Fixed per-session context was ~40k tokens, re-read on every call. Cutting it with the native `skillOverrides` setting (hide unused skills from the model, keep them invokable via `/name`), disabling unused plugins/MCP, and slimming CLAUDE.md brought it to ~25k. Mid-session model switching costs ~90k of cache writes each time (≈15–20 extra calls); it was only ~1% of my total because I rarely switch mid-session. Old tool output being re-read accounts for ~17% of cache reads, which is where output-compression tools like RTK actually help. Run `python3 analyze.py` to see your own numbers — stdlib only, fully local.
+My setup: Fable 5.1 only orchestrates, and all real work is delegated to Opus/Sonnet subagents. I audited 14 days of my local Claude Code logs (~46k API calls). **84% of tokens went to subagents** (1,047 of them, each starting from a 47k-token fixed context, with orchestrator, implementer and verifier re-reading the same material); in money (API prices) the ratio is ~1:2.9 rather than 1:6.6 by tokens, since subagents run on cheaper models. Re-pricing the same usage with Opus 5.5 (cheaper than Opus 5 on every line, cache reads at 40%) cuts it ~40%; my `opus` subagents were actually running Opus 5, fixed with `ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5-5`. Output was only ~6–7% of weighted cost, so "make Claude terse" tools have a low ceiling. Only 25 of ~480 installed skills were used in 60 days. Fixed per-session context was ~40k tokens, re-read on every call. Cutting it with the native `skillOverrides` setting (hide unused skills from the model, keep them invokable via `/name`), disabling unused plugins/MCP, and slimming CLAUDE.md brought it to ~25k. Mid-session model switching costs ~90k of cache writes each time (≈15–20 extra calls); it was only ~1% of my total because I rarely switch mid-session. Old tool output being re-read accounts for ~17% of cache reads, which is where output-compression tools like RTK actually help. Run `python3 analyze.py` to see your own numbers — stdlib only, fully local.
 
 ## License
 
